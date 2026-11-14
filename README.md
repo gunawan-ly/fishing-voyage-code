@@ -30,4 +30,4 @@ karena bukan file kode yang diubah di sini.
   inventaris, koleksi), ekonomi sewa + BBM + derek, dua perahu (Kayu dan
   Motor), dua zona laut (Dekat dan Tengah), panel koleksi, dan uji asap.
 - Bahasa antarmuka game: Bahasa Indonesia.
-- Versi game saat ini: 0.4.0.
+- Versi game saat ini: 0.5.0.

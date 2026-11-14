@@ -1,8 +1,9 @@
 extends Node2D
-## Fishing Voyage — Prototype Fase 0 (satu pemain).
-## Loop inti: jalan di pelabuhan -> naik perahu sistem -> berlayar ke laut ->
-## mancing -> tangkapan masuk inventaris pribadi -> pulang -> jual ikan.
-## Semua node dibangun dari kode supaya mudah diuji otomatis.
+## Fishing Voyage — Prototype 0.5.0 (satu pemain).
+## Loop inti: jalan di pelabuhan -> naik perahu sistem -> berlayar OTOMATIS ke
+## spot mancing -> mancing -> pindah spot bebas -> PULANG otomatis -> jual ikan.
+## Kontrol: joystick virtual + WASD/panah. Semua node dibangun dari kode
+## supaya mudah diuji otomatis.
 
 const TILE := "res://assets/kenney/tiny-town/Tiles/tile_%04d.png"
 const TILE_D := "res://assets/kenney/tiny-dungeon/Tiles/tile_%04d.png"
@@ -27,6 +28,13 @@ const PLAYER_SPEED := 135.0
 const BOAT_SPEED := 175.0
 const FUEL_MAX := 100.0
 const FUEL_DRAIN := 3.5      # per detik saat perahu bergerak
+# Joystick virtual (kiri bawah layar) dan titik spot mancing otomatis
+const JOYSTICK_CENTER := Vector2(94, 612)
+const JOYSTICK_RADIUS := 58.0
+const JOYSTICK_KNOB_RADIUS := 23.0
+const JOYSTICK_DEADZONE := 0.10
+const KAYU_SPOT := Vector2(1800, 360)    # spot otomatis Perahu Kayu (Zona Dekat)
+const MOTOR_SPOT := Vector2(3300, 360)   # spot otomatis Perahu Motor (Zona Tengah)
 
 var mode := "jalan"          # "jalan" | "perahu"
 var coins := 0
@@ -76,6 +84,17 @@ var touch_action := false
 var prev_touch_action := false
 var popups: Array = []
 
+# Perjalanan otomatis: "" | "berangkat" (ke spot) | "pulang" (ke dermaga)
+var auto_sailing := ""
+var auto_target := Vector2.ZERO
+# Joystick virtual
+var joystick_vector := Vector2.ZERO
+var joystick_touch_index := -1
+var joystick_mouse_active := false
+var joystick_root: Node2D
+var joystick_base: Polygon2D
+var joystick_knob: Polygon2D
+
 var player_sprite: Sprite2D
 var boat_node: Node2D
 var boat_visual: Node2D
@@ -95,6 +114,7 @@ var hud_toast: Label
 var hud_fuel: ProgressBar
 var hud_fuel_label: Label
 var act_button: Button
+var return_button: Button
 var collection_panel: PanelContainer
 var collection_box: VBoxContainer
 
@@ -389,19 +409,22 @@ func build_hud() -> void:
 	layer.add_child(collection_panel)
 	collection_box = VBoxContainer.new()
 	collection_panel.add_child(collection_box)
-	# Tombol sentuh: arah di kiri bawah, AKSI di kanan bawah (diperbesar)
-	var dirs := [["◀", Vector2(-1, 0), Vector2(12, 592)], ["▲", Vector2(0, -1), Vector2(70, 534)],
-		["▼", Vector2(0, 1), Vector2(70, 592)], ["▶", Vector2(1, 0), Vector2(128, 592)]]
-	for d in dirs:
-		var b := Button.new()
-		b.text = d[0]
-		b.position = d[2]
-		b.custom_minimum_size = Vector2(54, 54)
-		b.modulate.a = 0.75
-		var dir: Vector2 = d[1]
-		b.button_down.connect(func() -> void: touch_dir += dir)
-		b.button_up.connect(func() -> void: touch_dir -= dir)
-		layer.add_child(b)
+	# Joystick virtual di kiri bawah: lingkaran dasar diam, knob mengikuti sentuhan
+	joystick_root = Node2D.new()
+	joystick_root.position = JOYSTICK_CENTER
+	layer.add_child(joystick_root)
+	joystick_base = flat_poly(_circle_points(JOYSTICK_RADIUS), Color(0.08, 0.12, 0.16, 0.48), joystick_root)
+	joystick_knob = flat_poly(_circle_points(JOYSTICK_KNOB_RADIUS), Color(0.85, 0.91, 0.96, 0.82), joystick_root)
+	# Tombol PULANG (hanya tampil saat bebas berlayar di laut)
+	return_button = Button.new()
+	return_button.text = "PULANG"
+	return_button.position = Vector2(1010, 500)
+	return_button.custom_minimum_size = Vector2(122, 58)
+	return_button.modulate.a = 0.9
+	return_button.visible = false
+	return_button.pressed.connect(request_return)
+	layer.add_child(return_button)
+	# Tombol AKSI di kanan bawah
 	act_button = Button.new()
 	act_button.text = "AKSI"
 	act_button.position = Vector2(1142, 576)
@@ -410,6 +433,58 @@ func build_hud() -> void:
 	act_button.button_down.connect(func() -> void: touch_action = true)
 	act_button.button_up.connect(func() -> void: touch_action = false)
 	layer.add_child(act_button)
+
+# ---------- Joystick virtual (sentuh + mouse untuk uji di desktop) ----------
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventScreenTouch:
+		var e := event as InputEventScreenTouch
+		if e.pressed:
+			if joystick_touch_index == -1 and e.position.distance_to(JOYSTICK_CENTER) <= JOYSTICK_RADIUS + 35.0:
+				joystick_touch_index = e.index
+				_update_joystick(e.position)
+				get_viewport().set_input_as_handled()
+		elif e.index == joystick_touch_index:
+			joystick_touch_index = -1
+			_reset_joystick()
+			get_viewport().set_input_as_handled()
+	elif event is InputEventScreenDrag:
+		var e := event as InputEventScreenDrag
+		if e.index == joystick_touch_index:
+			_update_joystick(e.position)
+			get_viewport().set_input_as_handled()
+	elif event is InputEventMouseButton:
+		var e := event as InputEventMouseButton
+		if e.button_index == MOUSE_BUTTON_LEFT:
+			if e.pressed:
+				if e.position.distance_to(JOYSTICK_CENTER) <= JOYSTICK_RADIUS + 35.0:
+					joystick_mouse_active = true
+					_update_joystick(e.position)
+					get_viewport().set_input_as_handled()
+			elif joystick_mouse_active:
+				joystick_mouse_active = false
+				_reset_joystick()
+				get_viewport().set_input_as_handled()
+	elif event is InputEventMouseMotion and joystick_mouse_active:
+		var e := event as InputEventMouseMotion
+		_update_joystick(e.position)
+		get_viewport().set_input_as_handled()
+
+func _update_joystick(screen_pos: Vector2) -> void:
+	var offset := screen_pos - JOYSTICK_CENTER
+	offset = offset.limit_length(JOYSTICK_RADIUS)
+	joystick_knob.position = offset
+	var strength := offset.length() / JOYSTICK_RADIUS
+	if strength < JOYSTICK_DEADZONE:
+		joystick_vector = Vector2.ZERO
+	else:
+		joystick_vector = offset.normalized() * strength
+	touch_dir = joystick_vector
+
+func _reset_joystick() -> void:
+	joystick_vector = Vector2.ZERO
+	touch_dir = Vector2.ZERO
+	joystick_knob.position = Vector2.ZERO
 
 func toggle_collection() -> void:
 	collection_panel.visible = not collection_panel.visible
@@ -537,6 +612,70 @@ func load_game() -> void:
 		if kol is Dictionary:
 			collection = kol
 
+# ---------- Perjalanan otomatis (berangkat ke spot / pulang ke dermaga) ----------
+
+func begin_auto_sailing(target: Vector2, purpose: String) -> void:
+	auto_target = target
+	auto_sailing = purpose
+	_reset_joystick()
+
+func advance_auto_sailing(delta: float) -> void:
+	if auto_sailing == "" or mode != "perahu" or active_boat == "":
+		return
+	var info: Dictionary = BOATS[active_boat]
+	var speed := float(info["cepat"])
+	var drain := float(info["drain"])
+	var to_target := auto_target - boat_pos
+	var dist := to_target.length()
+	if dist < 1.0:
+		boat_pos = auto_target
+		_finish_auto_sailing()
+		return
+	var step := minf(dist, speed * delta)
+	var max_by_fuel := fuel / drain * speed
+	if step > max_by_fuel:
+		# BBM habis di tengah perjalanan: berhenti, pemain bisa minta derek (AKSI).
+		boat_pos += to_target.normalized() * max_by_fuel
+		fuel = 0.0
+		auto_sailing = ""
+		clamp_boat()
+		rigs[active_boat]["pos"] = boat_pos
+		show_toast("Bahan bakar habis di tengah perjalanan! Tekan AKSI untuk minta derek.")
+		play_sound("error_001.ogg")
+		return
+	boat_pos += to_target.normalized() * step
+	fuel = maxf(0.0, fuel - drain * (step / speed))
+	clamp_boat()
+	rigs[active_boat]["pos"] = boat_pos
+	if boat_pos.distance_to(auto_target) < 1.0:
+		boat_pos = auto_target
+		_finish_auto_sailing()
+
+# Melewati sisa perjalanan sekaligus (tombol AKSI saat berangkat).
+func finish_auto_sailing() -> void:
+	advance_auto_sailing(100000.0)
+
+func _finish_auto_sailing() -> void:
+	if auto_sailing == "":
+		return
+	var purpose := auto_sailing
+	auto_sailing = ""
+	boat_pos = auto_target
+	if purpose == "berangkat":
+		show_toast("Sampai di spot mancing Zona %s. Geser perahu untuk pindah spot, lempar kail bila siap." % zona_saat_ini().capitalize())
+		play_sound("confirmation_001.ogg")
+	elif purpose == "pulang":
+		disembark()
+
+func request_return() -> void:
+	if mode != "perahu" or auto_sailing != "" or not in_sea():
+		return
+	if fish_state != "":
+		cancel_fishing()
+	begin_auto_sailing(Vector2(rigs[active_boat]["home"]), "pulang")
+	show_toast("Berlayar otomatis kembali ke dermaga...")
+	play_sound("click_001.ogg")
+
 # ---------- Aksi permainan (dipakai input dan uji otomatis) ----------
 
 func board_boat() -> bool:
@@ -569,14 +708,15 @@ func board_boat() -> bool:
 	player_sprite.visible = false
 	boat_rider.visible = true
 	play_sound("click_001.ogg")
+	begin_auto_sailing(KAYU_SPOT if key == "kayu" else MOTOR_SPOT, "berangkat")
 	if ditanggung:
-		show_toast("Koin habis dan tangan kosong: perjalanan ini ditanggung sistem dulu. Selamat melaut!")
+		show_toast("Koin habis dan tangan kosong: perjalanan ini ditanggung sistem dulu. Perahu berlayar otomatis ke spot mancing.")
 	elif trips_done == 0:
-		show_toast("Perjalanan pertama: sewa gratis dari sistem. Selamat melaut!")
+		show_toast("Perjalanan pertama: sewa gratis dari sistem. Perahu berlayar otomatis ke spot mancing.")
 	elif total > 0:
-		show_toast("Sewa %s %s + BBM %s. Selamat melaut!" % [String(info["nama"]), format_rp(sewa), format_rp(biaya_bbm)])
+		show_toast("Sewa %s %s + BBM %s. Perahu berlayar otomatis ke spot mancing." % [String(info["nama"]), format_rp(sewa), format_rp(biaya_bbm)])
 	else:
-		show_toast("Naik %s. Berlayar ke kanan, lewati pelampung oranye untuk memancing." % String(info["nama"]))
+		show_toast("Naik %s. Perahu berlayar otomatis ke spot mancing." % String(info["nama"]))
 	save_game()
 	return true
 
@@ -691,6 +831,12 @@ func tow_home() -> void:
 	save_game()
 
 func on_action() -> void:
+	# Selama berlayar otomatis: AKSI melewati perjalanan berangkat; perjalanan pulang tidak diganggu.
+	if auto_sailing == "berangkat":
+		finish_auto_sailing()
+		return
+	if auto_sailing == "pulang":
+		return
 	if fish_state == "gigit":
 		resolve_catch()
 		return
@@ -732,7 +878,8 @@ func read_dir() -> Vector2:
 		d = d.normalized()
 	return d
 
-# Demo otomatis untuk rekaman: jalan ke dermaga, naik, melaut, mancing 2x, pulang, jual.
+# Demo otomatis untuk rekaman: jalan ke dermaga, naik, berlayar otomatis ke spot,
+# mancing 2x, pulang otomatis, jalan ke kios, jual.
 func run_demo(delta: float) -> void:
 	demo_t += delta
 	match demo_phase:
@@ -744,9 +891,9 @@ func run_demo(delta: float) -> void:
 				demo_phase = 1
 				demo_t = 0.0
 		1:
-			demo_dir = Vector2(1, 0)
-			if boat_pos.x >= 1750.0:
-				demo_dir = Vector2.ZERO
+			# Menunggu perjalanan otomatis tiba di spot mancing
+			demo_dir = Vector2.ZERO
+			if auto_sailing == "":
 				demo_phase = 2
 				demo_t = 0.0
 		2:
@@ -760,12 +907,12 @@ func run_demo(delta: float) -> void:
 				demo_catches += 1
 				demo_t = 0.0
 				if demo_catches >= 2:
+					request_return()
 					demo_phase = 3
 		3:
-			demo_dir = Vector2(-1, 0)
-			if boat_near_dock():
-				demo_dir = Vector2.ZERO
-				on_action()
+			# Menunggu perjalanan pulang otomatis selesai (pemain turun sendiri)
+			demo_dir = Vector2.ZERO
+			if mode == "jalan":
 				demo_phase = 4
 				demo_t = 0.0
 		4:
@@ -813,7 +960,15 @@ func _process(delta: float) -> void:
 		player_sprite.position = player_pos + Vector2(0, sin(time_passed * 9.0) * (1.5 if d != Vector2.ZERO else 0.0))
 		player_sprite.flip_h = facing < 0.0
 	else:
-		if d != Vector2.ZERO and fuel > 0.0 and fish_state == "":
+		if auto_sailing != "":
+			advance_auto_sailing(delta)
+			if mode == "perahu" and active_boat != "":
+				var dx := auto_target.x - boat_pos.x
+				if absf(dx) > 1.0:
+					boat_visual.scale.x = -1.0 if dx < 0.0 else 1.0
+					boat_label.scale.x = boat_visual.scale.x
+					boat_label.position.x = float(rigs[active_boat]["label_x"]) * boat_visual.scale.x
+		elif d != Vector2.ZERO and fuel > 0.0 and fish_state == "":
 			var info: Dictionary = BOATS[active_boat]
 			boat_pos += d * float(info["cepat"]) * delta
 			clamp_boat()
@@ -901,6 +1056,8 @@ func refresh_hud() -> void:
 	var di_perahu := mode == "perahu"
 	hud_fuel.visible = di_perahu
 	hud_fuel_label.visible = di_perahu
+	if return_button != null:
+		return_button.visible = mode == "perahu" and auto_sailing == "" and in_sea()
 	if mode == "jalan":
 		hud_zone.text = "Pelabuhan Wapalo"
 	elif in_sea():
@@ -920,9 +1077,13 @@ func refresh_hud() -> void:
 		elif near_stall():
 			hud_prompt.text = "[AKSI] Jual Semua Ikan" if not inventory.is_empty() else "Kios Pembeli Ikan (belum ada tangkapan)"
 		else:
-			hud_prompt.text = "Jalan: WASD / tombol panah — dekati dermaga atau kios"
+			hud_prompt.text = "Jalan: joystick / WASD — dekati dermaga atau kios"
 	else:
-		if boat_near_dock():
+		if auto_sailing == "berangkat":
+			hud_prompt.text = "Berlayar otomatis ke spot mancing… [AKSI] Lewati perjalanan"
+		elif auto_sailing == "pulang":
+			hud_prompt.text = "Berlayar otomatis kembali ke dermaga…"
+		elif boat_near_dock():
 			hud_prompt.text = "[AKSI] Turun di Dermaga"
 		elif fuel <= 0.0:
 			hud_prompt.text = "[AKSI] Bahan bakar habis — minta tarik ke dermaga"
@@ -932,7 +1093,11 @@ func refresh_hud() -> void:
 			hud_prompt.text = "Berlayar ke kanan, lewati pelampung oranye"
 	# Label tombol AKSI mengikuti konteks supaya pemain tidak menebak fungsinya
 	if act_button != null:
-		if fish_state == "gigit":
+		if auto_sailing == "berangkat":
+			act_button.text = "LEWATI"
+		elif auto_sailing == "pulang":
+			act_button.text = "AKSI"
+		elif fish_state == "gigit":
 			act_button.text = "TARIK!"
 		elif fish_state == "tunggu":
 			act_button.text = "BATAL"
