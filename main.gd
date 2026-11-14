@@ -1,5 +1,5 @@
 extends Node2D
-## Fishing Voyage — Prototype 0.7.0 (satu pemain).
+## Fishing Voyage — Prototype 0.7.1 (satu pemain).
 ## Loop inti: jalan di pelabuhan -> naik perahu sistem -> berlayar OTOMATIS ke
 ## spot mancing -> mancing -> pindah spot bebas -> PULANG otomatis -> jual ikan.
 ## Kontrol: joystick virtual + WASD/panah. Semua node dibangun dari kode
@@ -124,6 +124,9 @@ var hud_fuel_label: Label
 var act_button: Button
 var return_button: Button
 var buy_button: Button
+var reset_button: Button
+var reset_armed := false
+var reset_deadline := 0.0
 var collection_panel: PanelContainer
 var collection_box: VBoxContainer
 
@@ -459,6 +462,14 @@ func build_hud() -> void:
 	buy_button.visible = false
 	buy_button.pressed.connect(func() -> void: buy_boat())
 	layer.add_child(buy_button)
+	# Tombol ULANG progres (dua ketuk untuk konfirmasi, di bawah tombol KOLEKSI)
+	reset_button = Button.new()
+	reset_button.text = "ULANG"
+	reset_button.position = Vector2(1150, 64)
+	reset_button.custom_minimum_size = Vector2(114, 40)
+	reset_button.modulate.a = 0.7
+	reset_button.pressed.connect(on_reset_pressed)
+	layer.add_child(reset_button)
 	# Tombol AKSI di kanan bawah
 	act_button = Button.new()
 	act_button.text = "AKSI"
@@ -747,6 +758,34 @@ func buy_boat(key := "") -> bool:
 	save_game()
 	return true
 
+# Tombol ULANG: ketuk pertama mengokang konfirmasi, ketuk kedua menghapus progres.
+func on_reset_pressed() -> void:
+	if mode != "jalan":
+		show_toast("Turun dulu ke darat untuk mengulang progres.")
+		return
+	if not reset_armed:
+		reset_armed = true
+		reset_deadline = Time.get_ticks_msec() / 1000.0 + 3.0
+		reset_button.text = "YAKIN?"
+		show_toast("Tekan ULANG sekali lagi dalam 3 detik untuk menghapus semua progres.")
+		return
+	reset_progress()
+
+func reset_progress() -> void:
+	reset_armed = false
+	if reset_button != null:
+		reset_button.text = "ULANG"
+	coins = 0
+	trips_done = 0
+	fuel = FUEL_MAX
+	inventory = []
+	collection = {}
+	owned = {}
+	refresh_boat_labels()
+	save_game()
+	show_toast("Progres diulang dari awal. Selamat datang kembali di Pelabuhan Wapalo!")
+	play_sound("confirmation_001.ogg")
+
 # Label perahu menampilkan penanda MILIK untuk yang sudah dibeli.
 func refresh_boat_labels() -> void:
 	for key in rigs.keys():
@@ -801,12 +840,13 @@ func board_boat() -> bool:
 func disembark() -> bool:
 	if mode != "perahu" or not boat_near_dock() or fish_state != "":
 		return false
-	rigs[active_boat]["pos"] = rigs[active_boat]["home"]
-	boat_node.position = rigs[active_boat]["home"]
+	var home_b: Vector2 = rigs[active_boat]["home"]
+	rigs[active_boat]["pos"] = home_b
+	boat_node.position = home_b
 	active_boat = ""
-	boat_pos = Vector2(rigs["kayu"]["pos"])
+	boat_pos = home_b
 	mode = "jalan"
-	player_pos = Vector2(985, 361)
+	player_pos = Vector2(985, home_b.y)
 	player_sprite.visible = true
 	boat_rider.visible = false
 	trips_done += 1
@@ -1142,6 +1182,9 @@ func refresh_hud() -> void:
 	hud_fuel_label.visible = di_perahu
 	if return_button != null:
 		return_button.visible = mode == "perahu" and auto_sailing == "" and in_sea()
+	if reset_button != null and reset_armed and Time.get_ticks_msec() / 1000.0 > reset_deadline:
+		reset_armed = false
+		reset_button.text = "ULANG"
 	if buy_button != null:
 		var bk := nearest_boat_key()
 		var bisa_beli := mode == "jalan" and bk != "" and not bool(owned.get(bk, false))
@@ -1151,7 +1194,8 @@ func refresh_hud() -> void:
 	if mode == "jalan":
 		hud_zone.text = "Pelabuhan Wapalo"
 	elif in_sea():
-		hud_zone.text = "Laut — Zona Lepas" if zona_saat_ini() == "lepas" else ("Laut — Zona Tengah" if zona_saat_ini() == "tengah" else "Laut — Zona Dekat")
+		var zz := zona_saat_ini()
+		hud_zone.text = "Pelabuhan Wapalo" if zz == "pelabuhan" else ("Laut — Zona Lepas" if zz == "lepas" else ("Laut — Zona Tengah" if zz == "tengah" else "Laut — Zona Dekat"))
 	else:
 		hud_zone.text = "Perairan Pelabuhan"
 	if fish_state == "gigit":

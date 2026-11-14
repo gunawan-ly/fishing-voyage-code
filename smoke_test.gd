@@ -195,6 +195,19 @@ func _process(_delta: float) -> bool:
 		m.load_game()
 		check(bool(m.owned.get("kayu", false)), "kepemilikan pulih dari simpanan")
 		check("MILIK" in String(m.rigs["kayu"]["label"].text), "label perahu menampilkan penanda MILIK")
+		# Perbaikan 0.7.1: label zona pelabuhan, posisi turun per kapal, ulang progres
+		m.player_pos = Vector2(985, 505)
+		m.coins = 100000
+		m.fuel = 100.0
+		check(m.board_boat(), "naik Perahu Motor untuk uji turun")
+		m.refresh_hud()
+		check(m.hud_zone.text == "Perairan Pelabuhan", "label zona perairan pelabuhan benar saat di dermaga")
+		m.on_action()
+		m.request_return()
+		m.finish_auto_sailing()
+		check(m.player_pos.y == 505.0, "pemain turun di dermaga Perahu Motor")
+		m.reset_progress()
+		check(m.coins == 0 and m.owned.is_empty() and m.trips_done == 0, "ulang progres mengosongkan semua")
 		if failures.is_empty():
 			print("UJI_LOOP_LULUS")
 			quit(0)
