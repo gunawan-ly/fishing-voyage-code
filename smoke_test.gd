@@ -113,6 +113,45 @@ func _process(_delta: float) -> bool:
 		m.finish_auto_sailing()
 		check(m.mode == "jalan", "Perahu Kayu pulang otomatis ke darat")
 		check(m.trips_done == 4, "trip keempat tercatat")
+		# Kapal Nelayan dan Zona Lepas
+		m.player_pos = Vector2(985, 649)
+		check(m.near_boat(), "pemain dekat Kapal Nelayan")
+		m.coins = 200000
+		m.fuel = 100.0
+		check(m.board_boat(), "naik Kapal Nelayan")
+		check(m.active_boat == "nelayan", "perahu aktif adalah nelayan")
+		check(m.coins == 200000 - 60000, "sewa Kapal Nelayan terpotong")
+		m.on_action()
+		check(m.boat_pos == m.NELAYAN_SPOT, "Kapal Nelayan tiba di spot Zona Lepas")
+		check(m.zona_saat_ini() == "lepas", "zona lepas terdeteksi")
+		check(m.start_fishing(), "lempar kail di Zona Lepas")
+		m.debug_force_bite()
+	elif stage == 18:
+		check(m.fish_state == "gigit", "ikan Zona Lepas menggigit")
+		m.on_action()
+		check(m.inventory.size() == 2, "ikan Zona Lepas masuk inventaris")
+		var nama_lepas := String(m.inventory[1]["nama"])
+		check(nama_lepas in ["Kakap Putih", "Tuna Sirip Kuning", "Kerapu Macan", "Ikan Pedang"], "spesies khas Zona Lepas")
+		check(m.collection.has(nama_lepas), "koleksi mencatat spesies Lepas")
+		m.request_return()
+		m.finish_auto_sailing()
+		check(m.mode == "jalan", "turun otomatis dari Kapal Nelayan")
+		check(m.trips_done == 5, "trip kelima tercatat")
+		check(m.fuel > 0.0, "BBM masih tersisa sepulang dari Zona Lepas")
+		# Gerbang zona untuk Perahu Motor
+		m.player_pos = Vector2(985, 505)
+		m.coins = 200000
+		m.fuel = 100.0
+		check(m.board_boat(), "naik Perahu Motor lagi")
+		m.on_action()
+		check(m.boat_pos == m.MOTOR_SPOT, "Perahu Motor tiba di spot awal")
+		m.boat_pos = Vector2(5000, 360)
+		m.clamp_boat()
+		check(m.boat_pos.x == 4040.0, "Perahu Motor tertahan gerbang Zona Lepas")
+		m.request_return()
+		m.finish_auto_sailing()
+		check(m.mode == "jalan", "Perahu Motor pulang otomatis ke darat")
+		check(m.trips_done == 6, "trip keenam tercatat")
 		# Simpan dan muat ulang
 		var koin_simpan: int = m.coins
 		var bbm_simpan: float = m.fuel

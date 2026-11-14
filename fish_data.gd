@@ -15,6 +15,10 @@ const SPECIES: Array = [
 	{"nama": "Kuwe", "ikon": "fish_pink.png", "berat_min": 1.5, "berat_maks": 7.0, "harga_kg": 48000, "peluang": 26, "raritas": "Langka", "zona": "tengah"},
 	{"nama": "Tenggiri", "ikon": "fish_grey_long_a.png", "berat_min": 2.0, "berat_maks": 9.0, "harga_kg": 55000, "peluang": 26, "raritas": "Langka", "zona": "tengah"},
 	{"nama": "Marlin", "ikon": "fish_grey_long_b.png", "berat_min": 8.0, "berat_maks": 25.0, "harga_kg": 65000, "peluang": 14, "raritas": "Epik", "zona": "tengah"},
+	{"nama": "Kakap Putih", "ikon": "fish_grey.png", "berat_min": 3.0, "berat_maks": 12.0, "harga_kg": 52000, "peluang": 34, "raritas": "Langka", "zona": "lepas"},
+	{"nama": "Tuna Sirip Kuning", "ikon": "fish_yellow.png", "berat_min": 5.0, "berat_maks": 20.0, "harga_kg": 58000, "peluang": 30, "raritas": "Langka", "zona": "lepas"},
+	{"nama": "Kerapu Macan", "ikon": "fish_brown.png", "berat_min": 2.0, "berat_maks": 10.0, "harga_kg": 72000, "peluang": 22, "raritas": "Epik", "zona": "lepas"},
+	{"nama": "Ikan Pedang", "ikon": "fish_grey_long_b.png", "berat_min": 15.0, "berat_maks": 45.0, "harga_kg": 80000, "peluang": 14, "raritas": "Epik", "zona": "lepas"},
 ]
 
 static func spesies_di_zona(zona: String) -> Array:

@@ -1,5 +1,5 @@
 extends Node2D
-## Fishing Voyage — Prototype 0.5.0 (satu pemain).
+## Fishing Voyage — Prototype 0.6.0 (satu pemain).
 ## Loop inti: jalan di pelabuhan -> naik perahu sistem -> berlayar OTOMATIS ke
 ## spot mancing -> mancing -> pindah spot bebas -> PULANG otomatis -> jual ikan.
 ## Kontrol: joystick virtual + WASD/panah. Semua node dibangun dari kode
@@ -10,18 +10,22 @@ const TILE_D := "res://assets/kenney/tiny-dungeon/Tiles/tile_%04d.png"
 const FISH := "res://assets/kenney/fish-pack/PNG/Default/"
 const SUARA := "res://assets/kenney/interface-sounds/Audio/"
 
-const WORLD_W := 4600.0
+const WORLD_W := 6400.0
 const LAND_W := 820.0        # darat berakhir di x ini
 const SAND_W := 880.0        # pantai berakhir, air mulai
 const DOCK_RECT := Rect2(872, 330, 190, 62)   # area dermaga kayu
 const DOCK2_RECT := Rect2(872, 474, 190, 62)  # dermaga kedua untuk Perahu Motor
+const DOCK3_RECT := Rect2(872, 618, 190, 62)  # dermaga ketiga untuk Kapal Nelayan
 const BOAT_HOME := Vector2(1015, 361)         # posisi tambat Perahu Kayu
 const SEA_X := 1500.0        # mancing hanya boleh mulai x ini (Zona Dekat)
 const TENGAH_X := 2900.0     # Zona Tengah mulai x ini
+const LEPAS_X := 4700.0      # Zona Lepas mulai x ini
 const KAYU_MAX_X := 2240.0   # Perahu Kayu tidak boleh menerobos lebih jauh
+const MOTOR_MAX_X := 4040.0  # Perahu Motor tidak boleh menerobos lebih jauh
 const BOATS := {
 	"kayu": {"nama": "Perahu Kayu", "sewa": 7500, "cepat": 175.0, "drain": 3.5, "home": Vector2(1015, 361)},
-	"motor": {"nama": "Perahu Motor", "sewa": 20000, "cepat": 235.0, "drain": 5.0, "home": Vector2(1015, 505)},
+	"motor": {"nama": "Perahu Motor", "sewa": 20000, "cepat": 235.0, "drain": 4.0, "home": Vector2(1015, 505)},
+	"nelayan": {"nama": "Kapal Nelayan", "sewa": 60000, "cepat": 290.0, "drain": 2.5, "home": Vector2(1015, 649)},
 }
 const STALL_POS := Vector2(255, 322)          # pembeli ikan
 const PLAYER_SPEED := 135.0
@@ -35,6 +39,7 @@ const JOYSTICK_KNOB_RADIUS := 23.0
 const JOYSTICK_DEADZONE := 0.10
 const KAYU_SPOT := Vector2(1800, 360)    # spot otomatis Perahu Kayu (Zona Dekat)
 const MOTOR_SPOT := Vector2(3300, 360)   # spot otomatis Perahu Motor (Zona Tengah)
+const NELAYAN_SPOT := Vector2(5100, 360) # spot otomatis Kapal Nelayan (Zona Lepas)
 
 var mode := "jalan"          # "jalan" | "perahu"
 var coins := 0
@@ -195,7 +200,7 @@ func build_world() -> void:
 	ground_poly(Rect2(LAND_W, 0, SAND_W - LAND_W, 720), TILE % 41)
 	ground_poly(Rect2(SAND_W - 4, 0, 7, 720), "", Color(1, 1, 1, 0.45))
 	# Dua dermaga kayu (satu untuk tiap perahu sewaan)
-	for rect in [DOCK_RECT, DOCK2_RECT]:
+	for rect in [DOCK_RECT, DOCK2_RECT, DOCK3_RECT]:
 		ground_poly(rect, "", Color("9a6a38"))
 		for i in 6:
 			var x: float = rect.position.x + 14.0 + i * 31.0
@@ -245,6 +250,10 @@ func build_world() -> void:
 		var b2 := flat_poly(PackedVector2Array([Vector2(-7, -7), Vector2(7, -7), Vector2(7, 7), Vector2(-7, 7)]), Color("e33f2f"), self)
 		b2.position = Vector2(TENGAH_X, 70 + i * 145)
 	world_label("ZONA TENGAH", Vector2(TENGAH_X - 58, 26), 15, Color("ffd9d0"))
+	for i in 5:
+		var b3 := flat_poly(PackedVector2Array([Vector2(-7, -7), Vector2(7, -7), Vector2(7, 7), Vector2(-7, 7)]), Color("7e57c2"), self)
+		b3.position = Vector2(LEPAS_X, 70 + i * 145)
+	world_label("ZONA LEPAS", Vector2(LEPAS_X - 55, 26), 15, Color("e6d7ff"))
 	# Bayangan ikan berkeliaran di laut (hidup, bukan sekadar dekorasi diam)
 	for i in 7:
 		var sh := flat_poly(_circle_points(16.0), Color(0, 0, 0, 0.16), self)
@@ -267,6 +276,7 @@ func build_world() -> void:
 	# Perahu sewaan (digambar dari poligon, sprite perahu belum ada di paket gratis)
 	rigs["kayu"] = build_boat("kayu")
 	rigs["motor"] = build_boat("motor")
+	rigs["nelayan"] = build_boat("nelayan")
 	set_active_rig("kayu")
 	# Pemain
 	player_sprite = Sprite2D.new()
@@ -330,7 +340,7 @@ func build_boat(key: String) -> Dictionary:
 		flat_poly(PackedVector2Array([Vector2(-4, -4), Vector2(4, -4), Vector2(4, 4), Vector2(-4, 4)]), Color("5d3a17"), visual)
 		label.text = "PERAHU KAYU"
 		label.position = Vector2(-52, -46)
-	else:
+	elif key == "motor":
 		flat_poly(PackedVector2Array([Vector2(-84, -20), Vector2(52, -20), Vector2(88, 0), Vector2(52, 20), Vector2(-84, 20), Vector2(-100, 0)]), Color("2f6f79"), visual)
 		flat_poly(PackedVector2Array([Vector2(-76, -14), Vector2(48, -14), Vector2(74, 0), Vector2(48, 14), Vector2(-76, 14), Vector2(-88, 0)]), Color("9fc6cf"), visual)
 		flat_poly(PackedVector2Array([Vector2(-16, -13), Vector2(30, -13), Vector2(30, 13), Vector2(-16, 13)]), Color("e8f2f4"), visual)
@@ -339,11 +349,22 @@ func build_boat(key: String) -> Dictionary:
 		label.text = "PERAHU MOTOR"
 		label.position = Vector2(-56, -52)
 		label_x = -56.0
+	else:
+		# Kapal Nelayan: lambung besar merah bata, dek krem, kabin + tiang
+		flat_poly(PackedVector2Array([Vector2(-118, -26), Vector2(74, -26), Vector2(122, 0), Vector2(74, 26), Vector2(-118, 26), Vector2(-138, 0)]), Color("7a2e22"), visual)
+		flat_poly(PackedVector2Array([Vector2(-108, -19), Vector2(68, -19), Vector2(104, 0), Vector2(68, 19), Vector2(-108, 19), Vector2(-122, 0)]), Color("d9b380"), visual)
+		flat_poly(PackedVector2Array([Vector2(-30, -17), Vector2(28, -17), Vector2(28, 17), Vector2(-30, 17)]), Color("e8f2f4"), visual)
+		flat_poly(PackedVector2Array([Vector2(-22, -10), Vector2(20, -10), Vector2(20, 10), Vector2(-22, 10)]), Color("8fb6c4"), visual)
+		flat_poly(PackedVector2Array([Vector2(44, -3), Vector2(48, -3), Vector2(48, 3), Vector2(44, 3)]), Color("4a2c14"), visual)
+		flat_poly(PackedVector2Array([Vector2(-140, -11), Vector2(-124, -11), Vector2(-124, 11), Vector2(-140, 11)]), Color("263238"), visual)
+		label.text = "KAPAL NELAYAN"
+		label.position = Vector2(-64, -62)
+		label_x = -64.0
 	visual.add_child(label)
 	var rider := Sprite2D.new()
 	rider.texture = tex(TILE_D % 85)
 	rider.scale = Vector2(2, 2)
-	rider.position = Vector2(-8, -10) if key == "kayu" else Vector2(6, -2)
+	rider.position = Vector2(-8, -10) if key == "kayu" else (Vector2(6, -2) if key == "motor" else Vector2(0, -6))
 	rider.visible = false
 	visual.add_child(rider)
 	return {"node": node, "visual": visual, "label": label, "rider": rider, "pos": home, "home": home, "label_x": label_x}
@@ -572,13 +593,15 @@ func in_sea() -> bool:
 	return boat_pos.x >= SEA_X
 
 func zona_saat_ini() -> String:
+	if boat_pos.x >= LEPAS_X:
+		return "lepas"
 	if boat_pos.x >= TENGAH_X:
 		return "tengah"
 	if boat_pos.x >= SEA_X:
 		return "dekat"
 	return "pelabuhan"
 
-# Batas gerak perahu: tepi dunia + gerbang zona untuk Perahu Kayu.
+# Batas gerak perahu: tepi dunia + gerbang zona per kelas perahu.
 func clamp_boat() -> void:
 	boat_pos.x = clampf(boat_pos.x, 940.0, WORLD_W - 50.0)
 	boat_pos.y = clampf(boat_pos.y, 64.0, 656.0)
@@ -587,6 +610,11 @@ func clamp_boat() -> void:
 		if not zone_warned:
 			zone_warned = true
 			show_toast("Perahu Kayu tidak aman menerobos ke Zona Tengah. Sewa Perahu Motor di dermaga.")
+	elif active_boat == "motor" and boat_pos.x > MOTOR_MAX_X:
+		boat_pos.x = MOTOR_MAX_X
+		if not zone_warned:
+			zone_warned = true
+			show_toast("Perahu Motor tidak aman menerobos ke Zona Lepas. Sewa Kapal Nelayan di dermaga.")
 
 # ---------- Simpan dan muat progres ----------
 
@@ -708,7 +736,7 @@ func board_boat() -> bool:
 	player_sprite.visible = false
 	boat_rider.visible = true
 	play_sound("click_001.ogg")
-	begin_auto_sailing(KAYU_SPOT if key == "kayu" else MOTOR_SPOT, "berangkat")
+	begin_auto_sailing(KAYU_SPOT if key == "kayu" else (MOTOR_SPOT if key == "motor" else NELAYAN_SPOT), "berangkat")
 	if ditanggung:
 		show_toast("Koin habis dan tangan kosong: perjalanan ini ditanggung sistem dulu. Perahu berlayar otomatis ke spot mancing.")
 	elif trips_done == 0:
@@ -932,6 +960,8 @@ func walkable(p: Vector2) -> bool:
 		return true
 	if Rect2(800, 466, 266, 84).has_point(p):
 		return true
+	if Rect2(800, 610, 266, 84).has_point(p):
+		return true
 	return false
 
 func _process(delta: float) -> void:
@@ -1061,7 +1091,7 @@ func refresh_hud() -> void:
 	if mode == "jalan":
 		hud_zone.text = "Pelabuhan Wapalo"
 	elif in_sea():
-		hud_zone.text = "Laut — Zona Tengah" if zona_saat_ini() == "tengah" else "Laut — Zona Dekat"
+		hud_zone.text = "Laut — Zona Lepas" if zona_saat_ini() == "lepas" else ("Laut — Zona Tengah" if zona_saat_ini() == "tengah" else "Laut — Zona Dekat")
 	else:
 		hud_zone.text = "Perairan Pelabuhan"
 	if fish_state == "gigit":
@@ -1073,7 +1103,7 @@ func refresh_hud() -> void:
 			if trips_done == 0:
 				hud_prompt.text = "[AKSI] Naik Perahu (sewa pertama GRATIS)"
 			else:
-				hud_prompt.text = "[AKSI] Naik Perahu (Kayu %s / Motor %s + BBM)" % [format_rp(int(BOATS["kayu"]["sewa"])), format_rp(int(BOATS["motor"]["sewa"]))]
+				hud_prompt.text = "[AKSI] Naik Perahu (Kayu %s / Motor %s / Nelayan %s + BBM)" % [format_rp(int(BOATS["kayu"]["sewa"])), format_rp(int(BOATS["motor"]["sewa"])), format_rp(int(BOATS["nelayan"]["sewa"]))]
 		elif near_stall():
 			hud_prompt.text = "[AKSI] Jual Semua Ikan" if not inventory.is_empty() else "Kios Pembeli Ikan (belum ada tangkapan)"
 		else:
@@ -1124,4 +1154,8 @@ func _capture_later() -> void:
 	await get_tree().create_timer(1.0).timeout
 	img = get_viewport().get_texture().get_image()
 	img.save_png("/home/hatch/workspace/tools/fase1_tengah.png")
+	boat_pos = Vector2(5100, 360)
+	await get_tree().create_timer(1.0).timeout
+	img = get_viewport().get_texture().get_image()
+	img.save_png("/home/hatch/workspace/tools/060_lepas.png")
 	print("FOTO_SELESAI")
