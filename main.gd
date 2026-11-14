@@ -1,5 +1,5 @@
 extends Node2D
-## Fishing Voyage — Prototype 0.6.0 (satu pemain).
+## Fishing Voyage — Prototype 0.7.0 (satu pemain).
 ## Loop inti: jalan di pelabuhan -> naik perahu sistem -> berlayar OTOMATIS ke
 ## spot mancing -> mancing -> pindah spot bebas -> PULANG otomatis -> jual ikan.
 ## Kontrol: joystick virtual + WASD/panah. Semua node dibangun dari kode
@@ -23,10 +23,12 @@ const LEPAS_X := 4700.0      # Zona Lepas mulai x ini
 const KAYU_MAX_X := 2240.0   # Perahu Kayu tidak boleh menerobos lebih jauh
 const MOTOR_MAX_X := 4040.0  # Perahu Motor tidak boleh menerobos lebih jauh
 const BOATS := {
-	"kayu": {"nama": "Perahu Kayu", "sewa": 7500, "cepat": 175.0, "drain": 3.5, "home": Vector2(1015, 361)},
-	"motor": {"nama": "Perahu Motor", "sewa": 20000, "cepat": 235.0, "drain": 4.0, "home": Vector2(1015, 505)},
-	"nelayan": {"nama": "Kapal Nelayan", "sewa": 60000, "cepat": 290.0, "drain": 2.5, "home": Vector2(1015, 649)},
+	"kayu": {"nama": "Perahu Kayu", "sewa": 7500, "beli": 150000, "cepat": 175.0, "drain": 3.5, "home": Vector2(1015, 361)},
+	"motor": {"nama": "Perahu Motor", "sewa": 20000, "beli": 600000, "cepat": 235.0, "drain": 4.0, "home": Vector2(1015, 505)},
+	"nelayan": {"nama": "Kapal Nelayan", "sewa": 60000, "beli": 3000000, "cepat": 290.0, "drain": 2.5, "home": Vector2(1015, 649)},
 }
+const LABEL_BASE := {"kayu": "PERAHU KAYU", "motor": "PERAHU MOTOR", "nelayan": "KAPAL NELAYAN"}
+const INVENTORY_MAX := 20   # batas tas tangkapan pribadi
 const STALL_POS := Vector2(255, 322)          # pembeli ikan
 const PLAYER_SPEED := 135.0
 const BOAT_SPEED := 175.0
@@ -61,6 +63,7 @@ const FUEL_PRICE := 120
 const TOW_FEE := 15000
 
 var trips_done := 0
+var owned := {}                   # kunci perahu -> true bila sudah dibeli permanen
 var collection: Dictionary = {}   # nama spesies -> {"jumlah": int, "terberat": float}
 var rigs := {}                    # kunci perahu -> node/posisi/tambatannya
 var active_boat := ""             # "" di darat; "kayu" | "motor" saat berlayar
@@ -120,6 +123,7 @@ var hud_fuel: ProgressBar
 var hud_fuel_label: Label
 var act_button: Button
 var return_button: Button
+var buy_button: Button
 var collection_panel: PanelContainer
 var collection_box: VBoxContainer
 
@@ -278,6 +282,7 @@ func build_world() -> void:
 	rigs["motor"] = build_boat("motor")
 	rigs["nelayan"] = build_boat("nelayan")
 	set_active_rig("kayu")
+	refresh_boat_labels()
 	# Pemain
 	player_sprite = Sprite2D.new()
 	player_sprite.texture = tex(TILE_D % 85)
@@ -445,6 +450,15 @@ func build_hud() -> void:
 	return_button.visible = false
 	return_button.pressed.connect(request_return)
 	layer.add_child(return_button)
+	# Tombol BELI (hanya tampil di darat saat dekat perahu yang belum dimiliki)
+	buy_button = Button.new()
+	buy_button.text = "BELI"
+	buy_button.position = Vector2(1074, 424)
+	buy_button.custom_minimum_size = Vector2(190, 58)
+	buy_button.modulate.a = 0.9
+	buy_button.visible = false
+	buy_button.pressed.connect(func() -> void: buy_boat())
+	layer.add_child(buy_button)
 	# Tombol AKSI di kanan bawah
 	act_button = Button.new()
 	act_button.text = "AKSI"
@@ -625,6 +639,7 @@ func save_game() -> void:
 	c.set_value("progres", "bbm", fuel)
 	c.set_value("progres", "inventaris", inventory)
 	c.set_value("progres", "koleksi", collection)
+	c.set_value("progres", "milik", owned)
 	c.save(SAVE_PATH)
 
 func load_game() -> void:
@@ -639,6 +654,10 @@ func load_game() -> void:
 		var kol = c.get_value("progres", "koleksi", {})
 		if kol is Dictionary:
 			collection = kol
+		var mil = c.get_value("progres", "milik", {})
+		if mil is Dictionary:
+			owned = mil
+		refresh_boat_labels()
 
 # ---------- Perjalanan otomatis (berangkat ke spot / pulang ke dermaga) ----------
 
@@ -706,12 +725,41 @@ func request_return() -> void:
 
 # ---------- Aksi permainan (dipakai input dan uji otomatis) ----------
 
+# Membeli perahu/kapal secara permanen. Tanpa argumen = perahu terdekat di dermaga.
+func buy_boat(key := "") -> bool:
+	if key == "":
+		key = nearest_boat_key()
+	if key == "" or not BOATS.has(key):
+		return false
+	if bool(owned.get(key, false)):
+		show_toast("%s sudah menjadi milik sendiri." % String(BOATS[key]["nama"]))
+		return false
+	var harga := int(BOATS[key]["beli"])
+	if coins < harga:
+		show_toast("Koin kurang untuk membeli %s: perlu %s." % [String(BOATS[key]["nama"]), format_rp(harga)])
+		play_sound("error_001.ogg")
+		return false
+	coins -= harga
+	owned[key] = true
+	refresh_boat_labels()
+	show_toast("Selamat! %s sekarang MILIK SENDIRI. Berlayar seterusnya tanpa sewa, cukup isi BBM." % String(BOATS[key]["nama"]))
+	play_sound("confirmation_001.ogg")
+	save_game()
+	return true
+
+# Label perahu menampilkan penanda MILIK untuk yang sudah dibeli.
+func refresh_boat_labels() -> void:
+	for key in rigs.keys():
+		var rig: Dictionary = rigs[key]
+		rig["label"].text = String(LABEL_BASE[key]) + (" • MILIK" if bool(owned.get(key, false)) else "")
+
 func board_boat() -> bool:
 	var key := nearest_boat_key()
 	if key == "":
 		return false
 	var info: Dictionary = BOATS[key]
-	var sewa := int(info["sewa"]) if trips_done > 0 else 0
+	var milik := bool(owned.get(key, false))
+	var sewa := 0 if milik or trips_done == 0 else int(info["sewa"])
 	var biaya_bbm := int(round(FUEL_MAX - fuel)) * FUEL_PRICE
 	var total := sewa + biaya_bbm
 	var ditanggung := false
@@ -719,7 +767,7 @@ func board_boat() -> bool:
 		if inventory.is_empty():
 			ditanggung = true
 		else:
-			show_toast("Koin kurang: perlu %s (sewa + BBM). Jual ikan dulu." % format_rp(total))
+			show_toast("Koin kurang: perlu %s untuk berangkat. Jual ikan dulu." % format_rp(total))
 			play_sound("error_001.ogg")
 			return false
 	if not ditanggung:
@@ -741,6 +789,8 @@ func board_boat() -> bool:
 		show_toast("Koin habis dan tangan kosong: perjalanan ini ditanggung sistem dulu. Perahu berlayar otomatis ke spot mancing.")
 	elif trips_done == 0:
 		show_toast("Perjalanan pertama: sewa gratis dari sistem. Perahu berlayar otomatis ke spot mancing.")
+	elif milik:
+		show_toast("Naik %s milik sendiri, tanpa sewa (BBM %s). Perahu berlayar otomatis ke spot mancing." % [String(info["nama"]), format_rp(biaya_bbm)])
 	elif total > 0:
 		show_toast("Sewa %s %s + BBM %s. Perahu berlayar otomatis ke spot mancing." % [String(info["nama"]), format_rp(sewa), format_rp(biaya_bbm)])
 	else:
@@ -770,6 +820,10 @@ func disembark() -> bool:
 
 func start_fishing() -> bool:
 	if mode != "perahu" or not in_sea() or fish_state != "":
+		return false
+	if inventory.size() >= INVENTORY_MAX:
+		show_toast("Tas tangkapan penuh (maks %d ekor). Pulang dan jual dulu di kios." % INVENTORY_MAX)
+		play_sound("error_001.ogg")
 		return false
 	fish_zone = zona_saat_ini()
 	pending_species = {}
@@ -1088,6 +1142,12 @@ func refresh_hud() -> void:
 	hud_fuel_label.visible = di_perahu
 	if return_button != null:
 		return_button.visible = mode == "perahu" and auto_sailing == "" and in_sea()
+	if buy_button != null:
+		var bk := nearest_boat_key()
+		var bisa_beli := mode == "jalan" and bk != "" and not bool(owned.get(bk, false))
+		buy_button.visible = bisa_beli
+		if bisa_beli:
+			buy_button.text = "BELI %s" % format_rp(int(BOATS[bk]["beli"]))
 	if mode == "jalan":
 		hud_zone.text = "Pelabuhan Wapalo"
 	elif in_sea():
@@ -1103,7 +1163,11 @@ func refresh_hud() -> void:
 			if trips_done == 0:
 				hud_prompt.text = "[AKSI] Naik Perahu (sewa pertama GRATIS)"
 			else:
-				hud_prompt.text = "[AKSI] Naik Perahu (Kayu %s / Motor %s / Nelayan %s + BBM)" % [format_rp(int(BOATS["kayu"]["sewa"])), format_rp(int(BOATS["motor"]["sewa"])), format_rp(int(BOATS["nelayan"]["sewa"]))]
+				var nk := nearest_boat_key()
+				if nk != "" and bool(owned.get(nk, false)):
+					hud_prompt.text = "[AKSI] Naik %s (milik sendiri, cukup BBM)" % String(BOATS[nk]["nama"])
+				else:
+					hud_prompt.text = "[AKSI] Naik Perahu (Kayu %s / Motor %s / Nelayan %s + BBM)" % [format_rp(int(BOATS["kayu"]["sewa"])), format_rp(int(BOATS["motor"]["sewa"])), format_rp(int(BOATS["nelayan"]["sewa"]))]
 		elif near_stall():
 			hud_prompt.text = "[AKSI] Jual Semua Ikan" if not inventory.is_empty() else "Kios Pembeli Ikan (belum ada tangkapan)"
 		else:

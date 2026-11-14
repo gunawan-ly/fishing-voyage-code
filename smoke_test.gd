@@ -166,6 +166,35 @@ func _process(_delta: float) -> bool:
 		check(is_equal_approx(m.fuel, bbm_simpan), "BBM pulih dari simpanan")
 		check(m.inventory.size() == inventaris_simpan, "inventaris pulih dari simpanan")
 		check(not m.collection.is_empty(), "koleksi pulih dari simpanan")
+	elif stage == 23:
+		# Kepemilikan kapal permanen (0.7.0)
+		m.player_pos = Vector2(985, 361)
+		m.coins = 200000
+		m.fuel = 100.0
+		check(m.buy_boat("nelayan") == false, "beli Kapal Nelayan ditolak bila koin kurang")
+		check(m.buy_boat("kayu"), "beli Perahu Kayu berhasil")
+		check(m.coins == 50000, "harga beli Perahu Kayu terpotong")
+		check(bool(m.owned.get("kayu", false)), "Perahu Kayu tercatat milik sendiri")
+		check(m.buy_boat("kayu") == false, "membeli kapal yang sudah dimiliki ditolak")
+		check(m.board_boat(), "naik Perahu Kayu milik sendiri")
+		check(m.coins == 50000, "berlayar dengan kapal milik tanpa potongan sewa")
+		m.on_action()
+		check(m.boat_pos == m.KAYU_SPOT, "kapal milik tetap berlayar otomatis ke spot")
+		# Batas tas tangkapan pribadi
+		m.inventory = []
+		for i in 20:
+			m.inventory.append({"nama": "Uji", "berat": 1.0, "harga": 1000, "ikon": "fish_orange.png"})
+		check(m.start_fishing() == false, "tas penuh menolak lempar kail")
+		m.inventory = []
+		m.request_return()
+		m.finish_auto_sailing()
+		check(m.mode == "jalan", "pulang dari uji kepemilikan")
+		# Kepemilikan tersimpan dan termuat kembali
+		m.save_game()
+		m.owned = {}
+		m.load_game()
+		check(bool(m.owned.get("kayu", false)), "kepemilikan pulih dari simpanan")
+		check("MILIK" in String(m.rigs["kayu"]["label"].text), "label perahu menampilkan penanda MILIK")
 		if failures.is_empty():
 			print("UJI_LOOP_LULUS")
 			quit(0)
