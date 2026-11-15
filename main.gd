@@ -1,5 +1,5 @@
 extends Node2D
-## Fishing Voyage — Prototype 0.7.1 (satu pemain).
+## Fishing Voyage — Prototype 0.7.2 (satu pemain).
 ## Loop inti: jalan di pelabuhan -> naik perahu sistem -> berlayar OTOMATIS ke
 ## spot mancing -> mancing -> pindah spot bebas -> PULANG otomatis -> jual ikan.
 ## Kontrol: joystick virtual + WASD/panah. Semua node dibangun dari kode
@@ -35,9 +35,9 @@ const BOAT_SPEED := 175.0
 const FUEL_MAX := 100.0
 const FUEL_DRAIN := 3.5      # per detik saat perahu bergerak
 # Joystick virtual (kiri bawah layar) dan titik spot mancing otomatis
-const JOYSTICK_CENTER := Vector2(94, 612)
-const JOYSTICK_RADIUS := 58.0
-const JOYSTICK_KNOB_RADIUS := 23.0
+const JOYSTICK_CENTER := Vector2(112, 600)
+const JOYSTICK_RADIUS := 100.0
+const JOYSTICK_KNOB_RADIUS := 40.0
 const JOYSTICK_DEADZONE := 0.10
 const KAYU_SPOT := Vector2(1800, 360)    # spot otomatis Perahu Kayu (Zona Dekat)
 const MOTOR_SPOT := Vector2(3300, 360)   # spot otomatis Perahu Motor (Zona Tengah)
@@ -101,6 +101,7 @@ var joystick_touch_index := -1
 var joystick_mouse_active := false
 var joystick_root: Node2D
 var joystick_base: Polygon2D
+var joystick_ring: Line2D
 var joystick_knob: Polygon2D
 
 var player_sprite: Sprite2D
@@ -442,8 +443,19 @@ func build_hud() -> void:
 	joystick_root = Node2D.new()
 	joystick_root.position = JOYSTICK_CENTER
 	layer.add_child(joystick_root)
-	joystick_base = flat_poly(_circle_points(JOYSTICK_RADIUS), Color(0.08, 0.12, 0.16, 0.48), joystick_root)
-	joystick_knob = flat_poly(_circle_points(JOYSTICK_KNOB_RADIUS), Color(0.85, 0.91, 0.96, 0.82), joystick_root)
+	joystick_base = flat_poly(_circle_points(JOYSTICK_RADIUS), Color(0.15, 0.20, 0.25, 0.45), joystick_root)
+	# Cincin putih tipis di tepi dasar, mengikuti desain joystick Fishing Voyage V2.
+	joystick_ring = Line2D.new()
+	var ring_pts := PackedVector2Array()
+	for i in 41:
+		var a := TAU * float(i) / 40.0
+		ring_pts.append(Vector2(cos(a), sin(a)) * JOYSTICK_RADIUS)
+	joystick_ring.points = ring_pts
+	joystick_ring.width = 5.0
+	joystick_ring.default_color = Color(1, 1, 1, 0.30)
+	joystick_ring.antialiased = true
+	joystick_root.add_child(joystick_ring)
+	joystick_knob = flat_poly(_circle_points(JOYSTICK_KNOB_RADIUS), Color(0.90, 0.95, 1.00, 0.75), joystick_root)
 	# Tombol PULANG (hanya tampil saat bebas berlayar di laut)
 	return_button = Button.new()
 	return_button.text = "PULANG"
