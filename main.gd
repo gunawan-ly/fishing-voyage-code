@@ -1,5 +1,5 @@
 extends Node2D
-## Fishing Voyage — Prototype 0.7.2 (satu pemain).
+## Fishing Voyage — Prototype 0.8.0 (satu pemain).
 ## Loop inti: jalan di pelabuhan -> naik perahu sistem -> berlayar OTOMATIS ke
 ## spot mancing -> mancing -> pindah spot bebas -> PULANG otomatis -> jual ikan.
 ## Kontrol: joystick virtual + WASD/panah. Semua node dibangun dari kode
@@ -130,6 +130,13 @@ var reset_armed := false
 var reset_deadline := 0.0
 var collection_panel: PanelContainer
 var collection_box: VBoxContainer
+var phone_open := false
+var phone_panel: PanelContainer
+var phone_button: Button
+var phone_status_place: Label
+var phone_status_coins: Label
+var phone_pages := {}
+var phone_kapal_box: VBoxContainer
 
 func _ready() -> void:
 	rng.randomize()
@@ -424,14 +431,14 @@ func build_hud() -> void:
 	sb.set_content_margin_all(8.0)
 	hud_prompt.add_theme_stylebox_override("normal", sb)
 	hud_toast.add_theme_stylebox_override("normal", sb.duplicate())
-	# Tombol KOLEKSI + panel album ikan
-	var btn_kol := Button.new()
-	btn_kol.text = "KOLEKSI"
-	btn_kol.position = Vector2(1150, 10)
-	btn_kol.custom_minimum_size = Vector2(118, 38)
-	btn_kol.modulate.a = 0.9
-	btn_kol.pressed.connect(toggle_collection)
-	layer.add_child(btn_kol)
+	# Tombol HP: membuka ponsel dalam game (koleksi, harga, kapal, panduan, setelan)
+	phone_button = Button.new()
+	phone_button.text = "📱 HP"
+	phone_button.position = Vector2(1150, 10)
+	phone_button.custom_minimum_size = Vector2(118, 38)
+	phone_button.modulate.a = 0.9
+	phone_button.pressed.connect(func() -> void: open_phone("home"))
+	layer.add_child(phone_button)
 	collection_panel = PanelContainer.new()
 	collection_panel.position = Vector2(806, 56)
 	collection_panel.custom_minimum_size = Vector2(462, 0)
@@ -474,14 +481,6 @@ func build_hud() -> void:
 	buy_button.visible = false
 	buy_button.pressed.connect(func() -> void: buy_boat())
 	layer.add_child(buy_button)
-	# Tombol ULANG progres (dua ketuk untuk konfirmasi, di bawah tombol KOLEKSI)
-	reset_button = Button.new()
-	reset_button.text = "ULANG"
-	reset_button.position = Vector2(1150, 64)
-	reset_button.custom_minimum_size = Vector2(114, 40)
-	reset_button.modulate.a = 0.7
-	reset_button.pressed.connect(on_reset_pressed)
-	layer.add_child(reset_button)
 	# Tombol AKSI di kanan bawah
 	act_button = Button.new()
 	act_button.text = "AKSI"
@@ -491,10 +490,167 @@ func build_hud() -> void:
 	act_button.button_down.connect(func() -> void: touch_action = true)
 	act_button.button_up.connect(func() -> void: touch_action = false)
 	layer.add_child(act_button)
+	build_phone(layer)
+
+# ---------- Ponsel dalam game (0.8.0): dunia berhenti selama ponsel terbuka ----------
+
+func build_phone(layer: CanvasLayer) -> void:
+	phone_panel = PanelContainer.new()
+	phone_panel.position = Vector2(380, 56)
+	phone_panel.custom_minimum_size = Vector2(520, 608)
+	phone_panel.visible = false
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.07, 0.10, 0.15, 0.97)
+	sb.set_corner_radius_all(18)
+	sb.set_content_margin_all(14.0)
+	sb.border_color = Color(1, 1, 1, 0.25)
+	sb.set_border_width_all(2)
+	phone_panel.add_theme_stylebox_override("panel", sb)
+	layer.add_child(phone_panel)
+	var root := VBoxContainer.new()
+	root.add_theme_constant_override("separation", 10)
+	phone_panel.add_child(root)
+	# Bilah status: tempat saat ini + koin + tombol tutup
+	var bar := HBoxContainer.new()
+	bar.add_theme_constant_override("separation", 10)
+	root.add_child(bar)
+	phone_status_place = make_label(bar, "", 16, Color("cfeeff"))
+	phone_status_place.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	phone_status_coins = make_label(bar, "", 16, Color("ffd93b"))
+	var btn_close := Button.new()
+	btn_close.text = "✕"
+	btn_close.custom_minimum_size = Vector2(44, 36)
+	btn_close.pressed.connect(close_phone)
+	bar.add_child(btn_close)
+	# Halaman beranda: kisi aplikasi 4 kolom
+	var home := VBoxContainer.new()
+	home.add_theme_constant_override("separation", 10)
+	root.add_child(home)
+	phone_pages["home"] = home
+	make_label(home, "Ponsel Nelayan", 19, Color("ffd93b"))
+	var grid := GridContainer.new()
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	home.add_child(grid)
+	var apps := [
+		["🐟", "Koleksi", "koleksi"],
+		["💰", "Harga", "harga"],
+		["⛵", "Kapal", "kapal"],
+		["❓", "Panduan", "panduan"],
+		["⚙️", "Setelan", "setelan"],
+	]
+	for a in apps:
+		var b := Button.new()
+		b.text = "%s\n%s" % [a[0], a[1]]
+		b.custom_minimum_size = Vector2(112, 92)
+		var tujuan := String(a[2])
+		b.pressed.connect(func() -> void: show_phone_page(tujuan))
+		grid.add_child(b)
+	# Halaman Koleksi: panel album yang lama pindah ke dalam ponsel
+	var page_koleksi := _make_phone_page(root, "koleksi", "")
+	collection_panel.get_parent().remove_child(collection_panel)
+	page_koleksi.add_child(collection_panel)
+	collection_panel.position = Vector2.ZERO
+	collection_panel.custom_minimum_size = Vector2(0, 0)
+	collection_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	collection_panel.visible = true
+	# Halaman Harga: daftar harga per kg dari data spesies
+	var page_harga := _make_phone_page(root, "harga", "Harga Ikan (per kg)")
+	for sp in FishData.SPECIES:
+		make_label(page_harga, "%s — %s/kg • Zona %s • %s" % [String(sp["nama"]), format_rp(int(sp["harga_kg"])), String(sp["zona"]).capitalize(), String(sp["raritas"])], 14)
+	# Halaman Kapal: status kepemilikan + harga, disegarkan tiap dibuka
+	var page_kapal := _make_phone_page(root, "kapal", "Kapal Saya")
+	phone_kapal_box = VBoxContainer.new()
+	page_kapal.add_child(phone_kapal_box)
+	# Halaman Panduan: cara bermain ringkas
+	var page_panduan := _make_phone_page(root, "panduan", "Panduan Bermain")
+	var panduan := [
+		"• Jalan dengan joystick atau WASD / tombol panah.",
+		"• Dekati dermaga lalu tekan AKSI untuk naik perahu. Kapal berlayar otomatis ke spot mancing.",
+		"• Di spot, tekan AKSI untuk melempar kail. Tunggu tanda ! lalu tekan AKSI secepatnya.",
+		"• Berlayar bebas dengan joystick untuk pindah spot. BBM hanya terkuras saat kapal bergerak.",
+		"• Tekan PULANG untuk kembali ke pelabuhan, kapal pulang otomatis.",
+		"• Jual tangkapan di kios PEMBELI IKAN. Tas pribadi maksimal 20 ekor.",
+		"• Beli kapal di dermaga supaya bebas sewa selamanya, cukup bayar BBM.",
+		"• Perahu Kayu hanya Zona Dekat, Perahu Motor sampai Zona Tengah, Kapal Nelayan semua zona.",
+	]
+	for baris in panduan:
+		var l := make_label(page_panduan, baris, 14)
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# Halaman Setelan: tombol ULANG progres tinggal di sini
+	var page_setelan := _make_phone_page(root, "setelan", "Pengaturan")
+	reset_button = Button.new()
+	reset_button.text = "ULANG PROGRES"
+	reset_button.custom_minimum_size = Vector2(220, 48)
+	reset_button.modulate.a = 0.85
+	reset_button.pressed.connect(on_reset_pressed)
+	page_setelan.add_child(reset_button)
+	var note := make_label(page_setelan, "Menghapus koin, ikan, koleksi, dan kapal milik, lalu mulai dari awal. Tekan dua kali untuk konfirmasi. Hanya bisa saat di darat.", 13)
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	show_phone_page("home")
+
+func _make_phone_page(root: VBoxContainer, key: String, title: String) -> VBoxContainer:
+	var page := VBoxContainer.new()
+	page.add_theme_constant_override("separation", 6)
+	page.visible = false
+	root.add_child(page)
+	phone_pages[key] = page
+	var back := Button.new()
+	back.text = "‹ Kembali"
+	back.custom_minimum_size = Vector2(120, 34)
+	back.pressed.connect(func() -> void: show_phone_page("home"))
+	page.add_child(back)
+	if title != "":
+		make_label(page, title, 17, Color("ffd93b"))
+	return page
+
+func open_phone(page := "home") -> void:
+	phone_open = true
+	phone_panel.visible = true
+	show_phone_page(page)
+	play_sound("click_001.ogg")
+
+func close_phone() -> void:
+	phone_open = false
+	phone_panel.visible = false
+	play_sound("click_001.ogg")
+
+func show_phone_page(page: String) -> void:
+	for key in phone_pages.keys():
+		(phone_pages[key] as Control).visible = key == page
+	if page == "kapal":
+		refresh_phone_kapal()
+	elif page == "koleksi":
+		refresh_collection_panel()
+	refresh_phone_status()
+
+func refresh_phone_status() -> void:
+	if phone_status_place == null:
+		return
+	phone_status_place.text = hud_zone.text
+	phone_status_coins.text = format_rp(coins)
+
+func refresh_phone_kapal() -> void:
+	if phone_kapal_box == null:
+		return
+	for ch in phone_kapal_box.get_children():
+		phone_kapal_box.remove_child(ch)
+		ch.queue_free()
+	if mode == "perahu" and active_boat != "":
+		make_label(phone_kapal_box, "Sedang berlayar: %s" % String(BOATS[active_boat]["nama"]), 15, Color("cfeeff"))
+	for key in ["kayu", "motor", "nelayan"]:
+		var info: Dictionary = BOATS[key]
+		if bool(owned.get(key, false)):
+			make_label(phone_kapal_box, "%s — MILIK, bebas sewa selamanya" % String(info["nama"]), 15, Color("7be495"))
+		else:
+			make_label(phone_kapal_box, "%s — Sewa %s • Beli %s" % [String(info["nama"]), format_rp(int(info["sewa"])), format_rp(int(info["beli"]))], 15)
 
 # ---------- Joystick virtual (sentuh + mouse untuk uji di desktop) ----------
 
 func _input(event: InputEvent) -> void:
+	if phone_open:
+		return  # Sentuhan saat ponsel terbuka hanya untuk tombol ponsel
 	if event is InputEventScreenTouch:
 		var e := event as InputEventScreenTouch
 		if e.pressed:
@@ -545,10 +701,7 @@ func _reset_joystick() -> void:
 	joystick_knob.position = Vector2.ZERO
 
 func toggle_collection() -> void:
-	collection_panel.visible = not collection_panel.visible
-	if collection_panel.visible:
-		refresh_collection_panel()
-	play_sound("click_001.ogg")
+	open_phone("koleksi")
 
 func refresh_collection_panel() -> void:
 	if collection_box == null or not collection_panel.visible:
@@ -786,7 +939,7 @@ func on_reset_pressed() -> void:
 func reset_progress() -> void:
 	reset_armed = false
 	if reset_button != null:
-		reset_button.text = "ULANG"
+		reset_button.text = "ULANG PROGRES"
 	coins = 0
 	trips_done = 0
 	fuel = FUEL_MAX
@@ -1071,6 +1224,8 @@ func walkable(p: Vector2) -> bool:
 	return false
 
 func _process(delta: float) -> void:
+	if phone_open:
+		return  # Dunia berhenti selama ponsel terbuka (termasuk timer gigitan ikan)
 	time_passed += delta
 	if demo_mode:
 		run_demo(delta)
@@ -1196,7 +1351,7 @@ func refresh_hud() -> void:
 		return_button.visible = mode == "perahu" and auto_sailing == "" and in_sea()
 	if reset_button != null and reset_armed and Time.get_ticks_msec() / 1000.0 > reset_deadline:
 		reset_armed = false
-		reset_button.text = "ULANG"
+		reset_button.text = "ULANG PROGRES"
 	if buy_button != null:
 		var bk := nearest_boat_key()
 		var bisa_beli := mode == "jalan" and bk != "" and not bool(owned.get(bk, false))
@@ -1278,4 +1433,13 @@ func _capture_later() -> void:
 	await get_tree().create_timer(1.0).timeout
 	img = get_viewport().get_texture().get_image()
 	img.save_png("/home/hatch/workspace/tools/060_lepas.png")
+	open_phone("home")
+	await get_tree().create_timer(0.9).timeout
+	img = get_viewport().get_texture().get_image()
+	img.save_png("/home/hatch/workspace/tools/0.8.0_hp.png")
+	show_phone_page("koleksi")
+	await get_tree().create_timer(0.6).timeout
+	img = get_viewport().get_texture().get_image()
+	img.save_png("/home/hatch/workspace/tools/0.8.0_koleksi.png")
+	close_phone()
 	print("FOTO_SELESAI")
